@@ -1,0 +1,13 @@
+[Unit]
+Description=BRIO 500 LAN web monitoring dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ko2520/webcam_monitoring
+ExecStart=/usr/bin/python3 -m brio_ocr_monitor.web --config config.json --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

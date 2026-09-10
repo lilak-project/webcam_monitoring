@@ -1,0 +1,48 @@
+{
+  "camera": {
+    "device": "/dev/video0",
+    "input_format": "mjpeg",
+    "width": 1920,
+    "height": 1080,
+    "framerate": 30,
+    "controls": {}
+  },
+  "roi": {
+    "x": 890,
+    "y": 200,
+    "width": 300,
+    "height": 190,
+    "scale": 4
+  },
+  "preprocess": {
+    "grayscale": true,
+    "contrast": 1.5,
+    "brightness": 0.0,
+    "sharpen": true
+  },
+  "ocr": {
+    "language": "eng",
+    "psm": 6,
+    "dpi": 300,
+    "whitelist": ""
+  },
+  "validation": {
+    "pattern": ""
+  },
+  "storage": {
+    "directory": "data",
+    "csv": "readings.csv",
+    "keep_success_artifacts": true
+  },
+  "schedule": {
+    "interval_seconds": 60
+  },
+  "influx": {
+    "enabled": false,
+    "url": "http://localhost:8086",
+    "org": "my-org",
+    "bucket": "camera",
+    "measurement": "screen_ocr",
+    "token_env": "INFLUXDB_TOKEN"
+  }
+}

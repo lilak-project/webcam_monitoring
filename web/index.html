@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Webcam Monitoring</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1118; --card:#151e29; --line:#29384a; --text:#eaf1f8; --muted:#91a1b5; --green:#3ddc97; --red:#ff6b6b; --blue:#53a9ff; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
+    main { width:min(1400px, 96vw); margin:24px auto; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
+    h1 { font-size:clamp(22px,3vw,34px); margin:0; }
+    h2 { font-size:18px; margin:0 0 12px; }
+    .status { color:var(--muted); } .status.ok { color:var(--green); } .status.bad { color:var(--red); }
+    .grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(310px,1fr); gap:18px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; box-shadow:0 12px 30px #0004; }
+    .live-wrap { position:relative; width:100%; aspect-ratio:16/9; background:#05080c; border-radius:9px; overflow:hidden; touch-action:none; }
+    .live { width:100%; height:100%; object-fit:contain; display:block; }
+    .overlay { position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; }
+    .hint { color:var(--muted); margin:9px 0 0; font-size:13px; }
+    .zoom { width:100%; aspect-ratio:16/9; object-fit:contain; display:block; background:#05080c; border-radius:9px; border:1px solid var(--line); }
+    .roi-value { color:var(--green); font:13px/1.4 ui-monospace,monospace; margin:8px 0 0; overflow-wrap:anywhere; }
+    .buttons { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+    button { border:0; border-radius:8px; padding:10px 15px; cursor:pointer; background:var(--blue); color:#07101a; font-weight:700; }
+    button.secondary { background:#27384c; color:var(--text); }
+    button:disabled { opacity:.45; cursor:wait; }
+    dl { display:grid; grid-template-columns:110px 1fr; gap:7px 12px; margin:0; }
+    dt { color:var(--muted); } dd { margin:0; overflow-wrap:anywhere; }
+    #message { min-height:48px; margin-top:14px; padding:10px; background:#0b1118; border-radius:8px; color:var(--muted); white-space:pre-wrap; }
+    .table-card { margin-top:18px; overflow:auto; }
+    table { width:100%; border-collapse:collapse; min-width:760px; }
+    th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--muted); font-weight:600; } td.raw { max-width:420px; white-space:pre-wrap; }
+    .pill { border-radius:999px; padding:3px 8px; font-size:12px; background:#27384c; }
+    .pill.ok { color:var(--green); } .pill.error,.pill.ocr_failed { color:var(--red); }
+    @media (max-width:850px) { .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header><h1>Webcam Monitoring</h1><div id="connection" class="status">연결 확인 중…</div></header>
+  <section class="grid">
+    <div class="card">
+      <div class="live-wrap" id="live-wrap">
+        <img id="live" class="live" src="/api/live.mjpg" alt="BRIO 500 실시간 영상">
+        <canvas id="overlay" class="overlay"></canvas>
+      </div>
+      <p class="hint">영상 위에서 확대할 부분을 마우스 또는 터치로 드래그하세요.</p>
+      <div class="buttons">
+        <button id="capture">사진 저장</button>
+        <button id="ocr">사진 촬영 + OCR</button>
+        <button class="secondary" id="save-roi">선택 영역을 OCR ROI로 저장</button>
+        <button class="secondary" id="reset-roi">전체 화면 선택</button>
+        <button class="secondary" id="refresh">데이터 새로고침</button>
+      </div>
+    </div>
+    <aside class="card">
+      <h2>선택 영역 실시간 확대</h2>
+      <canvas id="zoom" class="zoom" width="960" height="540"></canvas>
+      <div id="roi-value" class="roi-value">영역을 선택하세요.</div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+      <h2>카메라 상태</h2>
+      <dl>
+        <dt>장치</dt><dd id="device">-</dd>
+        <dt>해상도</dt><dd id="resolution">-</dd>
+        <dt>송출 FPS</dt><dd id="fps">-</dd>
+        <dt>프레임 지연</dt><dd id="age">-</dd>
+        <dt>오류</dt><dd id="error">없음</dd>
+      </dl>
+      <div id="message">버튼을 눌러 사진을 저장하거나 OCR을 실행하세요.</div>
+    </aside>
+  </section>
+  <section class="card table-card">
+    <h2>OCR 데이터</h2>
+    <table>
+      <thead><tr><th>시각</th><th>상태</th><th>값</th><th>OCR 원문</th><th>오류</th></tr></thead>
+      <tbody id="readings"><tr><td colspan="5">기록이 없습니다.</td></tr></tbody>
+    </table>
+  </section>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  const live = $('live'), overlay = $('overlay'), overlayContext = overlay.getContext('2d');
+  const zoom = $('zoom'), zoomContext = zoom.getContext('2d');
+  let selection = null, dragStart = null, configuredRoiLoaded = false;
+  async function request(url, options) {
+    const response = await fetch(url, options);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    return data;
+  }
+  async function updateStatus() {
+    try {
+      const s = await request('/api/status');
+      $('connection').textContent = s.connected ? '● 카메라 연결됨' : '● 카메라 연결 대기';
+      $('connection').className = `status ${s.connected ? 'ok' : 'bad'}`;
+      $('device').textContent = s.device; $('resolution').textContent = s.resolution;
+      $('fps').textContent = s.stream_fps; $('age').textContent = s.frame_age_seconds == null ? '-' : `${s.frame_age_seconds}초`;
+      $('error').textContent = s.last_error || '없음';
+      if (!configuredRoiLoaded && s.roi) {
+        selection = {x:s.roi.x, y:s.roi.y, width:s.roi.width, height:s.roi.height};
+        configuredRoiLoaded = true; drawSelection();
+      }
+    } catch (e) { $('connection').textContent = '● 서버 연결 실패'; $('connection').className = 'status bad'; }
+  }
+  async function updateReadings() {
+    try {
+      const data = await request('/api/readings?limit=100');
+      $('readings').innerHTML = data.readings.length ? data.readings.map(r => `<tr>
+        <td>${escapeHtml(r.timestamp)}</td><td><span class="pill ${escapeHtml(r.status)}">${escapeHtml(r.status)}</span></td>
+        <td>${escapeHtml(r.value)}</td><td class="raw">${escapeHtml(r.raw_text)}</td><td>${escapeHtml(r.error)}</td></tr>`).join('')
+        : '<tr><td colspan="5">기록이 없습니다.</td></tr>';
+    } catch (e) { $('message').textContent = `데이터 조회 실패: ${e.message}`; }
+  }
+  function escapeHtml(value) { const d=document.createElement('div'); d.textContent=value || ''; return d.innerHTML; }
+  function sourceSize() {
+    return {width: live.naturalWidth || 1920, height: live.naturalHeight || 1080};
+  }
+  function resizeOverlay() {
+    const box = overlay.getBoundingClientRect();
+    overlay.width = Math.max(1, Math.round(box.width)); overlay.height = Math.max(1, Math.round(box.height));
+    drawSelection();
+  }
+  function pointFromEvent(event) {
+    const box = overlay.getBoundingClientRect(), size = sourceSize();
+    return {
+      x: Math.max(0, Math.min(size.width, (event.clientX-box.left) * size.width/box.width)),
+      y: Math.max(0, Math.min(size.height, (event.clientY-box.top) * size.height/box.height))
+    };
+  }
+  function drawSelection() {
+    overlayContext.clearRect(0,0,overlay.width,overlay.height);
+    if (!selection) return;
+    const size=sourceSize(), sx=overlay.width/size.width, sy=overlay.height/size.height;
+    const x=selection.x*sx, y=selection.y*sy, w=selection.width*sx, h=selection.height*sy;
+    overlayContext.fillStyle='rgba(0,0,0,.28)'; overlayContext.fillRect(0,0,overlay.width,overlay.height);
+    overlayContext.clearRect(x,y,w,h); overlayContext.strokeStyle='#3ddc97'; overlayContext.lineWidth=3;
+    overlayContext.strokeRect(x,y,w,h);
+    $('roi-value').textContent=`x=${Math.round(selection.x)}, y=${Math.round(selection.y)}, width=${Math.round(selection.width)}, height=${Math.round(selection.height)}`;
+  }
+  overlay.addEventListener('pointerdown', event => {
+    overlay.setPointerCapture(event.pointerId); dragStart=pointFromEvent(event);
+    selection={x:dragStart.x,y:dragStart.y,width:1,height:1}; drawSelection();
+  });
+  overlay.addEventListener('pointermove', event => {
+    if (!dragStart) return; const p=pointFromEvent(event);
+    selection={x:Math.min(p.x,dragStart.x),y:Math.min(p.y,dragStart.y),width:Math.abs(p.x-dragStart.x),height:Math.abs(p.y-dragStart.y)};
+    drawSelection();
+  });
+  overlay.addEventListener('pointerup', () => { dragStart=null; });
+  overlay.addEventListener('pointercancel', () => { dragStart=null; });
+  function updateZoom() {
+    if (selection && selection.width>=2 && selection.height>=2 && live.complete && live.naturalWidth) {
+      zoomContext.fillStyle='#05080c'; zoomContext.fillRect(0,0,zoom.width,zoom.height);
+      const sourceRatio=selection.width/selection.height, targetRatio=zoom.width/zoom.height;
+      let dw=zoom.width, dh=zoom.height, dx=0, dy=0;
+      if (sourceRatio>targetRatio) { dh=dw/sourceRatio; dy=(zoom.height-dh)/2; }
+      else { dw=dh*sourceRatio; dx=(zoom.width-dw)/2; }
+      try { zoomContext.drawImage(live,selection.x,selection.y,selection.width,selection.height,dx,dy,dw,dh); } catch (_) {}
+    }
+    requestAnimationFrame(updateZoom);
+  }
+  async function action(button, url) {
+    button.disabled = true; $('message').textContent = '처리 중…';
+    try {
+      const data = await request(url, {method:'POST'});
+      $('message').textContent = data.reading
+        ? `상태: ${data.reading.status}\n값: ${data.reading.value || '(없음)'}\nOCR: ${data.reading.raw_text || '(없음)'}\n${data.reading.error || ''}`
+        : `저장 완료: ${data.path}`;
+      await updateReadings();
+    } catch (e) { $('message').textContent = `오류: ${e.message}`; }
+    finally { button.disabled = false; }
+  }
+  $('capture').onclick = () => action($('capture'), '/api/capture');
+  $('ocr').onclick = () => action($('ocr'), '/api/ocr');
+  $('save-roi').onclick = async () => {
+    if (!selection || selection.width<10 || selection.height<10) { $('message').textContent='먼저 10픽셀 이상의 영역을 선택하세요.'; return; }
+    const roi={x:Math.round(selection.x),y:Math.round(selection.y),width:Math.round(selection.width),height:Math.round(selection.height)};
+    try { const data=await request('/api/roi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(roi)}); selection=data.roi; drawSelection(); $('message').textContent=`OCR ROI 저장 완료: ${JSON.stringify(data.roi)}`; }
+    catch(e) { $('message').textContent=`ROI 저장 실패: ${e.message}`; }
+  };
+  $('reset-roi').onclick = () => { const size=sourceSize(); selection={x:0,y:0,width:size.width,height:size.height}; drawSelection(); };
+  $('refresh').onclick = updateReadings;
+  window.addEventListener('resize', resizeOverlay); live.addEventListener('load', resizeOverlay);
+  resizeOverlay(); updateZoom(); updateStatus(); updateReadings();
+  setInterval(updateStatus, 3000); setInterval(updateReadings, 10000);
+</script>
+</body>
+</html>
