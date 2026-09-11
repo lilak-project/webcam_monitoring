@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -x "$project_dir/.runtime/bin/ffplay" ]]; then
+  export PATH="$project_dir/.runtime/bin:$PATH"
+fi
 
 usage() {
   cat <<'EOF'
@@ -9,7 +13,7 @@ BRIO 500의 실시간 영상을 ffplay 창으로 표시합니다.
   ./scripts/live-view.sh [옵션]
 
 옵션:
-  -d, --device PATH       비디오 장치 (기본값: /dev/video0)
+  -d, --device DEVICE     비디오 장치 (Linux: /dev/video0, macOS: Brio 500)
   -s, --size WIDTHxHEIGHT 해상도 (기본값: 1920x1080)
   -r, --framerate FPS     초당 프레임 수 (기본값: 30)
   -f, --format FORMAT     입력 형식 (기본값: mjpeg)
@@ -26,6 +30,11 @@ EOF
 }
 
 device="/dev/video0"
+backend="v4l2"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  backend="avfoundation"
+  device="Brio 500"
+fi
 video_size="1920x1080"
 framerate="30"
 input_format="mjpeg"
@@ -71,11 +80,15 @@ done
 
 if ! command -v ffplay >/dev/null 2>&1; then
   echo "오류: ffplay가 없습니다. 다음 명령으로 설치하세요:" >&2
-  echo "  sudo apt install ffmpeg" >&2
+  if [[ "$backend" == "avfoundation" ]]; then
+    echo "  brew install ffmpeg" >&2
+  else
+    echo "  sudo apt install ffmpeg" >&2
+  fi
   exit 1
 fi
 
-if [[ ! -e "$device" ]]; then
+if [[ "$backend" == "v4l2" && ! -e "$device" ]]; then
   echo "오류: 비디오 장치를 찾을 수 없습니다: $device" >&2
   echo "USB 연결을 확인한 뒤 다음 명령으로 장치를 찾아보세요:" >&2
   echo "  ls -l /dev/video*" >&2
@@ -96,14 +109,21 @@ echo "장치: $device"
 echo "영상: $input_format, $video_size, ${framerate}fps"
 echo "종료하려면 영상 창에서 q 또는 Esc를 누르세요."
 
+input_args=( -f "$backend" )
+if [[ "$backend" == "avfoundation" ]]; then
+  input_args+=( -pixel_format uyvy422 )
+  [[ "$device" == *:* ]] || device="${device}:none"
+else
+  input_args+=( -input_format "$input_format" )
+fi
+
 command=(
   ffplay
   -hide_banner
   -loglevel warning
   -fflags nobuffer
   -flags low_delay
-  -f v4l2
-  -input_format "$input_format"
+  "${input_args[@]}"
   -video_size "$video_size"
   -framerate "$framerate"
   -i "$device"

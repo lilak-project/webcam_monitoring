@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "Capture a display with a Logitech BRIO 500 and log OCR readings"
 requires-python = ">=3.10"
 
+[project.optional-dependencies]
+tracking = ["opencv-python-headless==4.8.1.78", "numpy>=1.23,<2"]
+
 [project.scripts]
 brio-ocr = "brio_ocr_monitor.cli:main"
 

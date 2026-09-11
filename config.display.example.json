@@ -1,0 +1,195 @@
+{
+  "camera": {
+    "device": "Brio 500 #2",
+    "input_format": "mjpeg",
+    "width": 1920,
+    "height": 1080,
+    "framerate": 30,
+    "controls": {},
+    "backend": "avfoundation",
+    "pixel_format": "uyvy422"
+  },
+  "roi": {
+    "x": 890,
+    "y": 200,
+    "width": 300,
+    "height": 190,
+    "scale": 4
+  },
+  "preprocess": {
+    "grayscale": true,
+    "contrast": 1.5,
+    "brightness": 0.0,
+    "sharpen": true
+  },
+  "ocr": {
+    "language": "eng",
+    "psm": 6,
+    "dpi": 300,
+    "whitelist": ""
+  },
+  "validation": {
+    "pattern": ""
+  },
+  "storage": {
+    "directory": "data",
+    "csv": "readings.csv",
+    "keep_success_artifacts": true
+  },
+  "schedule": {
+    "interval_seconds": 60
+  },
+  "influx": {
+    "enabled": false,
+    "url": "http://localhost:8086",
+    "org": "my-org",
+    "bucket": "camera",
+    "measurement": "screen_ocr",
+    "token_env": "INFLUXDB_TOKEN"
+  },
+  "display_monitor": {
+    "enabled": true,
+    "auto_start": true,
+    "interval_seconds": 30,
+    "analysis_enabled": true,
+    "analysis_interval_seconds": 30,
+    "capture_enabled": false,
+    "capture_interval_seconds": 60,
+    "voice_beam_enabled": true,
+    "voice_current_enabled": true,
+    "voice_hourly_enabled": true,
+    "reference": "data/screen-reference.jpg",
+    "corners": [
+      [
+        423,
+        123
+      ],
+      [
+        1383,
+        127
+      ],
+      [
+        1494,
+        631
+      ],
+      [
+        298,
+        631
+      ]
+    ],
+    "size": [
+      1400,
+      600
+    ],
+    "max_shift_px": 100,
+    "fields": [
+      {
+        "key": "beam",
+        "label": "Beam",
+        "box": [0, 50, 800, 45],
+        "kind": "beam_state"
+      },
+      {
+        "key": "isol_beam",
+        "label": "ISOL Beam",
+        "box": [1250, 70, 105, 38],
+        "kind": "state",
+        "alternatives": [
+          {
+            "box": [
+              1120,
+              59,
+              222,
+              30
+            ],
+            "pattern": "BEAM(ON|OFF)"
+          }
+        ]
+      },
+      {
+        "key": "isol_element",
+        "label": "ISOL Element",
+        "box": [1220, 75, 145, 50],
+        "kind": "element",
+        "fallback_value": "21Na5+",
+        "parts": {
+          "mass": {"box": [1250, 80, 45, 28], "whitelist": "0123456789"},
+          "symbol": {"box": [1270, 92, 55, 35], "whitelist": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"},
+          "charge": {"box": [1300, 76, 30, 30], "whitelist": "0123456789", "binary": true, "psm": 13}
+        }
+      },
+      {
+        "key": "energy_kev_u",
+        "label": "ISOL Energy",
+        "box": [1200, 130, 150, 40],
+        "unit": "keV/u",
+        "kind": "number",
+        "decimals": 2,
+        "min_confidence": 0,
+        "allow_majority": true,
+        "min": 0,
+        "max": 1000000.0
+      },
+      {
+        "key": "current_ua",
+        "label": "ISOL Current",
+        "box": [
+          1210,
+          165,
+          140,
+          38
+        ],
+        "unit": "µA",
+        "kind": "number",
+        "decimals": 3,
+        "min_confidence": 0,
+        "allow_majority": true,
+        "min": 0,
+        "max": 1000000.0,
+        "alternatives": [
+          {
+            "box": [
+              1105,
+              156,
+              258,
+              30
+            ],
+            "pattern": "CURRENT(\\d+\\.\\d{3})[UΜ]{1,2}A"
+          }
+        ]
+      },
+      {
+        "key": "isol_rate_hz",
+        "label": "Timing (ISOL) Pulse Rate",
+        "box": [1280, 225, 75, 32],
+        "unit": "Hz",
+        "kind": "number",
+        "decimals": 0,
+        "min_confidence": 0,
+        "min": 0,
+        "max": 1000000.0
+      },
+      {
+        "key": "isol_width_us",
+        "label": "Timing (ISOL) Pulse Width",
+        "box": [1200, 245, 165, 42],
+        "unit": "µs",
+        "kind": "number",
+        "decimals": 0,
+        "min_confidence": 0,
+        "min": 0,
+        "max": 1000000.0
+      },
+      {
+        "key": "attenuator",
+        "label": "Attenuator",
+        "box": [410, 398, 105, 48],
+        "kind": "attenuator",
+        "min_confidence": 0,
+        "min_matches": 1,
+        "allow_majority": true
+      }
+    ],
+    "keep_artifacts": 20
+  }
+}

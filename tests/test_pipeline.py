@@ -1,13 +1,33 @@
 import tempfile
 import unittest
 import json
+import threading
 from pathlib import Path
+from unittest.mock import patch
 
-from brio_ocr_monitor.pipeline import Reading, append_csv, build_video_filter, validate
+from brio_ocr_monitor.pipeline import PipelineError, Reading, append_csv, build_video_filter, camera_input_args, capture, validate
 from brio_ocr_monitor.web import DashboardServer
 
 
 class PipelineTests(unittest.TestCase):
+    def test_mac_capture_uses_named_camera_without_device_file(self):
+        config = {"camera": {"backend": "avfoundation", "device": "Brio 500", "width": 1920, "height": 1080, "framerate": 30}}
+        with patch("brio_ocr_monitor.pipeline.run_checked") as run:
+            capture(config, Path("shot.jpg"))
+        command = run.call_args.args[0]
+        self.assertIn("avfoundation", command)
+        self.assertIn("Brio 500:none", command)
+        self.assertNotIn("-input_format", command)
+
+    def test_linux_input_preserves_mjpeg(self):
+        args = camera_input_args({"backend": "v4l2", "device": "/dev/video0", "input_format": "mjpeg", "width": 1920, "height": 1080, "framerate": 30})
+        self.assertIn("mjpeg", args)
+        self.assertEqual(args[-1], "/dev/video0")
+
+    def test_mac_rejects_linux_device_path(self):
+        with self.assertRaises(PipelineError):
+            camera_input_args({"backend": "avfoundation", "device": "/dev/video0"})
+
     def test_filter_contains_crop_scale_and_preprocessing(self):
         config = {
             "roi": {"x": 10, "y": 20, "width": 300, "height": 190, "scale": 4},
@@ -38,6 +58,7 @@ class PipelineTests(unittest.TestCase):
             config_path = Path(directory) / "config.json"
             server = DashboardServer.__new__(DashboardServer)
             server.config_path = config_path
+            server.config_lock = threading.Lock()
             server.config = {
                 "camera": {"width": 1920, "height": 1080},
                 "roi": {"x": 0, "y": 0, "width": 100, "height": 100, "scale": 4},

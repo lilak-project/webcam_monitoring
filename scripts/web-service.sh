@@ -3,6 +3,9 @@ set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_dir"
+if [[ -x "$project_dir/.runtime/bin/python3" ]]; then
+  export PATH="$project_dir/.runtime/bin:$PATH"
+fi
 
 if [[ ! -f config.json ]]; then
   cp config.example.json config.json

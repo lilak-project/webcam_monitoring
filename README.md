@@ -1,10 +1,95 @@
 # BRIO 500 화면 OCR 모니터
 
 Logitech BRIO 500으로 모니터/장비 화면을 주기적으로 촬영하고, 지정 영역(ROI)을
-전처리한 뒤 Tesseract OCR 결과를 CSV 또는 InfluxDB에 기록하는 작은 Linux용
+전처리한 뒤 Tesseract OCR 결과를 CSV 또는 InfluxDB에 기록하는 Linux/macOS용
 파이프라인입니다.
 
+## macOS에서 실행
+
+```bash
+brew install ffmpeg tesseract
+```
+
+Homebrew 설치가 어려운 구형 macOS에서는 Anaconda로 프로젝트 전용 환경을
+만들 수 있습니다. 실행 스크립트가 `.runtime/bin`을 자동으로 사용합니다.
+
+```bash
+conda create -p "$PWD/.runtime" -c defaults --override-channels python=3.11 ffmpeg tesseract -y
+```
+
+`config.json`의 `camera`에 다음 값을 설정합니다. 해상도와 FPS는 기존 값을 유지합니다.
+
+```json
+"backend": "avfoundation",
+"device": "Brio 500",
+"pixel_format": "uyvy422",
+"controls": {}
+```
+
+카메라 이름이나 번호는 `ffmpeg -f avfoundation -list_devices true -i ""`로
+확인할 수 있습니다. macOS에서는 `/dev/video0` 및 V4L2 제어를 사용하지 않습니다.
+카메라 접근 허용 창이 나타나면 허용하세요.
+
+```bash
+./scripts/server-start.sh
+./scripts/server-stop.sh
+```
+
+시작 스크립트는 서버를 백그라운드에서 실행합니다. 실행 로그는
+`data/web-service.log`, 프로세스 번호는 `data/web-service.pid`에 저장됩니다.
+터미널에서 직접 실행 상태를 보고 싶다면 `./scripts/web-service.sh`를 사용합니다.
+
+브라우저에서 http://localhost:8080 에 접속합니다. 별도 영상 창은
+`./scripts/live-view.sh`로 열 수 있습니다. 웹 서비스와 동시에 실행하지 마세요.
+입력 옵션은 [FFmpeg AVFoundation 문서](https://www.ffmpeg.org/ffmpeg-devices.html#avfoundation)를 참고하세요.
+
 ## 먼저 확인할 것
+
+### RAON 화면 자동 판독과 위치 보정
+
+`display_monitor.enabled: true` 설정에서는 웹 서버가 같은 카메라 프레임을 공유해
+설정한 간격으로 Beam, ISOL 에너지·전류, Chopper/ISOL 반복률·펄스 폭,
+Attenuator/Single bunch/Stripper 상태를 읽습니다. 대시보드 상단에서 자동 판독을
+중지하거나 즉시 실행하고 CSV를 내려받을 수 있습니다. 사진 저장 주기와 값 분석·기록
+주기는 각각 2~86400초 범위에서 독립적으로 설정할 수 있습니다. 설정은 `config.json`에
+저장되어 재시작 후에도 유지됩니다. 자동 사진은 날짜별 `data/snapshots/YYYYMMDD/`에
+`full-날짜-시간.jpg` 전체 화면과 `selected-날짜-시간.jpg` 원근 보정 영역을 한 쌍으로 저장합니다.
+판독이 간격보다 오래 걸리면
+완료 후 다음 판독을 시작하며 작업은 중첩하지 않습니다.
+
+추가 패키지 설치:
+
+```bash
+.runtime/bin/python3 -m pip install --only-binary=:all: 'opencv-python-headless==4.8.1.78' 'numpy<2'
+```
+
+`config.display.example.json`은 현재 배치에 대한 설정 예시입니다. 기준 사진은
+`data/screen-reference.jpg`, 화면 네 모서리 좌표는 `display_monitor.corners`
+(좌상→우상→우하→좌하), 개별 판독 영역은 정면으로 보정한 1400×600 화면 좌표입니다.
+다른 설치에서는 자기 카메라의 기준 사진과 좌표를 설정해야 합니다.
+
+대시보드에서 **기울기 보정 영역 선택**을 누르고 좌상→우상→우하→좌하 순서로
+네 모서리를 찍으면 비대칭 사각형을 정면 화면으로 펼쳐 미리 볼 수 있습니다.
+**보정 영역 저장**은 선택 좌표와 그 순간의 원본 프레임을 새 추적 기준으로 저장합니다.
+
+특징점 일치와 원근 보정으로 작은 이동·회전·크기 변화를 보정합니다. 기본 허용치는
+기준 사진 대비 모서리 이동 100픽셀입니다. 보정 실패, 화면 이탈, 5초 이상 오래된
+카메라 프레임은 실패로 기록하며 이전 값을 재사용하지 않습니다. 위치가 크게 바뀌면
+기준 사진과 모서리 좌표를 다시 설정하고 웹 서비스를 재시작하세요.
+
+각 항목은 세 가지 전처리 결과 중 최소 두 개의 신뢰도 기준을 통과한 값이 일치해야
+유효합니다. 숫자만으로 불확실한 경우 항목 이름을 포함한 추가 영역으로 재검증합니다. 값이 서로 다르거나 소수점이 누락되면 ‘확인 필요’로 표시하고 CSV 값은
+빈칸으로 남깁니다. 단위는 설정값이며 원소/동위원소 위첨자는 자동 판독 대상에서
+제외합니다. 이 검증은 OCR 오독 가능성을 완전히 없애지는 않습니다.
+
+기록은 `data/display-readings.csv`, 원본·보정 이미지와 개별 OCR 결과는
+`data/display/<시각>/result.json`에 저장합니다. CSV는 계속 유지하며 이미지 증거는
+`keep_artifacts`에 설정한 최근 20회만 유지하며 대시보드에서 사진을 확인할 수 있습니다. 기본 설정으로 서버를 다시
+실행하면 자동 판독도 시작합니다.
+
+위치 보정 구현은 [OpenCV 특징점과 Homography 문서](https://docs.opencv.org/4.10.0/d7/dff/tutorial_feature_homography.html)의 방식을 사용합니다.
+
+### Linux USB 연결 확인
 
 현재 구성에서는 USB-C 변환 어댑터의 접촉 불량 가능성이 가장 큽니다. 자동화를
 시작하기 전에 아래 명령에서 `046d:0943`과 `/dev/video0`이 안정적으로 유지되는지
@@ -100,7 +185,7 @@ python3 -m brio_ocr_monitor run --config config.json \
 별도의 Python 패키지는 필요하지 않습니다.
 
 ```bash
-./scripts/web-service.sh
+./scripts/server-start.sh
 ```
 
 서버의 IP 주소를 확인합니다.
@@ -120,7 +205,7 @@ hostname -I
 포트를 변경하려면 다음처럼 실행합니다.
 
 ```bash
-PORT=8090 ./scripts/web-service.sh
+PORT=8090 ./scripts/server-start.sh
 ```
 
 방화벽이 활성화되어 있다면 내부망에서만 포트를 허용합니다.

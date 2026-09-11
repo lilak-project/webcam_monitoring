@@ -4,8 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Webcam Monitoring</title>
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <style>
-    :root { color-scheme: dark; --bg:#0b1118; --card:#151e29; --line:#29384a; --text:#eaf1f8; --muted:#91a1b5; --green:#3ddc97; --red:#ff6b6b; --blue:#53a9ff; }
+    :root { color-scheme: light; --bg:#f3f6fa; --card:#ffffff; --line:#ccd6e2; --text:#172230; --muted:#63758a; --green:#07875d; --red:#d43f4c; --blue:#1677d2; }
     * { box-sizing: border-box; }
     body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
     main { width:min(1400px, 96vw); margin:24px auto; }
@@ -14,51 +15,126 @@
     h2 { font-size:18px; margin:0 0 12px; }
     .status { color:var(--muted); } .status.ok { color:var(--green); } .status.bad { color:var(--red); }
     .grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(310px,1fr); gap:18px; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; box-shadow:0 12px 30px #0004; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; box-shadow:0 10px 26px #24466b18; }
     .live-wrap { position:relative; width:100%; aspect-ratio:16/9; background:#05080c; border-radius:9px; overflow:hidden; touch-action:none; }
     .live { width:100%; height:100%; object-fit:contain; display:block; }
     .overlay { position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; }
     .hint { color:var(--muted); margin:9px 0 0; font-size:13px; }
     .zoom { width:100%; aspect-ratio:16/9; object-fit:contain; display:block; background:#05080c; border-radius:9px; border:1px solid var(--line); }
+    .zoom[hidden] { display:none; }
     .roi-value { color:var(--green); font:13px/1.4 ui-monospace,monospace; margin:8px 0 0; overflow-wrap:anywhere; }
     .buttons { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
-    button { border:0; border-radius:8px; padding:10px 15px; cursor:pointer; background:var(--blue); color:#07101a; font-weight:700; }
-    button.secondary { background:#27384c; color:var(--text); }
+    button { border:0; border-radius:8px; padding:10px 15px; cursor:pointer; background:var(--blue); color:#fff; font-weight:700; }
+    button.secondary { background:#e4ebf3; color:var(--text); }
     button:disabled { opacity:.45; cursor:wait; }
+    input[type=number] { width:100px; padding:8px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--text); }
+    input[type=url],input[type=password] { min-width:280px; padding:8px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--text); }
+    .schedule { display:flex; flex-wrap:wrap; gap:12px 22px; align-items:center; margin:12px 0; }
+    .schedule label { display:flex; align-items:center; gap:8px; }
+    .schedule-break { flex-basis:100%; height:0; }
     dl { display:grid; grid-template-columns:110px 1fr; gap:7px 12px; margin:0; }
     dt { color:var(--muted); } dd { margin:0; overflow-wrap:anywhere; }
-    #message { min-height:48px; margin-top:14px; padding:10px; background:#0b1118; border-radius:8px; color:var(--muted); white-space:pre-wrap; }
+    #message { min-height:48px; margin-top:14px; padding:10px; background:#f3f6fa; border:1px solid var(--line); border-radius:8px; color:var(--muted); white-space:pre-wrap; }
     .table-card { margin-top:18px; overflow:auto; }
     table { width:100%; border-collapse:collapse; min-width:760px; }
     th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
     th { color:var(--muted); font-weight:600; } td.raw { max-width:420px; white-space:pre-wrap; }
-    .pill { border-radius:999px; padding:3px 8px; font-size:12px; background:#27384c; }
+    .pill { border-radius:999px; padding:3px 8px; font-size:12px; background:#e4ebf3; }
     .pill.ok { color:var(--green); } .pill.error,.pill.ocr_failed { color:var(--red); }
+    .lightbox { position:fixed; inset:0; z-index:1000; display:grid; place-items:center; padding:24px; background:#000d; }
+    .lightbox[hidden] { display:none; }
+    .lightbox img { max-width:96vw; max-height:90vh; object-fit:contain; background:#05080c; border:1px solid var(--line); border-radius:10px; }
+    .lightbox button { position:absolute; top:18px; right:18px; font-size:20px; }
+    .artifact-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:14px; margin-top:14px; }
+    .artifact { background:#f8fafc; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+    .artifact img { display:block; width:100%; aspect-ratio:7/3; object-fit:cover; cursor:zoom-in; }
+    .artifact-info { padding:10px; }
+    .artifact-info .buttons { margin-top:8px; }
+    .artifact-info button { padding:6px 9px; font-size:12px; }
+    .profile-card { margin-top:12px; padding:13px; border:1px solid var(--line); border-radius:10px; background:#f8fafc; }
+    .profile-card code { overflow-wrap:anywhere; color:var(--blue); }
     @media (max-width:850px) { .grid { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
 <main>
   <header><h1>Webcam Monitoring</h1><div id="connection" class="status">연결 확인 중…</div></header>
+  <section class="card" id="monitor-card" style="margin-bottom:18px" hidden>
+    <h2>화면 정보 자동 판독</h2>
+    <p id="monitor-status" class="hint">판독 준비 중…</p>
+    <div class="buttons" style="margin-bottom:14px">
+      <button id="service-start">카메라·분석 시작</button>
+      <button class="secondary" id="service-stop">카메라·분석 중지</button>
+    </div>
+    <div class="schedule">
+      <label><input type="checkbox" id="capture-enabled"> 사진 자동 저장</label>
+      <label>사진 주기 <input type="number" id="capture-interval" min="2" max="86400" step="1" value="60"> 초</label>
+      <label><input type="checkbox" id="analysis-enabled"> 값 자동 분석·기록</label>
+      <label>분석 주기 <input type="number" id="analysis-interval" min="2" max="86400" step="1" value="30"> 초</label>
+      <button class="secondary" id="schedule-save">주기 설정 저장</button>
+      <div class="schedule-break" aria-hidden="true"></div>
+      <label><input type="checkbox" id="voice-beam-enabled" checked> Beam 음성 알림</label>
+      <label><input type="checkbox" id="voice-current-enabled" checked> Current 음성 알림</label>
+      <label><input type="checkbox" id="voice-hourly-enabled" checked> 매시간 시각 알림</label>
+      <button class="secondary" id="voice-test">음성 테스트</button>
+    </div>
+    <details style="margin:14px 0">
+      <summary>Dooray 자동 전송 설정</summary>
+      <div class="schedule" style="margin-top:12px">
+        <label><input type="checkbox" id="dooray-enabled"> 자동 사진 저장 때 Dooray 전송</label>
+        <div class="schedule-break" aria-hidden="true"></div>
+        <label>Webhook URL <input type="password" id="dooray-webhook" autocomplete="off" placeholder="저장된 URL을 유지하려면 비워두세요"></label>
+        <label>사진 공개 주소 <input type="url" id="dooray-public-url" placeholder="https://외부에서-접근가능한-주소"></label>
+        <button class="secondary" id="dooray-save">Dooray 설정 저장</button>
+        <button class="secondary" id="dooray-test">Dooray 테스트</button>
+        <button class="secondary" id="dooray-send-now">현재 사진·기록 보내기</button>
+      </div>
+      <p id="dooray-status" class="hint">Webhook 설정을 불러오는 중…</p>
+      <div class="profile-card">
+        <strong>Dooray 연결 프로필</strong>
+        <dl style="margin-top:9px">
+          <dt>연결 상태</dt><dd id="dooray-profile-state">확인 중…</dd>
+          <dt>서버</dt><dd id="dooray-profile-host">-</dd>
+          <dt>저장된 주소</dt><dd><code id="dooray-profile-url">-</code></dd>
+          <dt>사진 전송</dt><dd id="dooray-profile-photo">-</dd>
+        </dl>
+      </div>
+      <p class="hint">성공한 이전 전송 이후의 Current 기록을 모두 함께 보냅니다. 사진은 Dooray 서버가 접근할 수 있는 HTTPS 공개 주소가 있어야 전송됩니다. 주소가 없으면 Current 기록만 보냅니다.</p>
+    </details>
+    <div class="buttons">
+      <button id="monitor-run">지금 읽기</button>
+      <a href="/api/monitor/data.csv" style="color:var(--blue);align-self:center">기록 CSV 다운로드</a>
+      <a href="#recent-analysis" style="color:var(--blue);align-self:center">최근 분석 사진 보기</a>
+    </div>
+    <div id="monitor-values" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px"></div>
+    <p class="hint">Beam과 Current가 켜지거나 꺼질 때 음성으로 알립니다. Current는 0이면 꺼짐, 1 이상이면 켜짐으로 판단합니다.</p>
+    <details style="margin-top:12px"><summary>위치 보정된 화면 확인</summary><img id="monitor-preview" style="width:100%;margin-top:10px" alt="최근 판독에 사용한 보정 화면" hidden></details>
+  </section>
   <section class="grid">
     <div class="card">
       <div class="live-wrap" id="live-wrap">
         <img id="live" class="live" src="/api/live.mjpg" alt="BRIO 500 실시간 영상">
         <canvas id="overlay" class="overlay"></canvas>
       </div>
-      <p class="hint">영상 위에서 확대할 부분을 마우스 또는 터치로 드래그하세요.</p>
+      <p class="hint" id="selection-hint">영상 위에서 확대할 부분을 마우스 또는 터치로 드래그하세요.</p>
       <div class="buttons">
         <button id="capture">사진 저장</button>
-        <button id="ocr">사진 촬영 + OCR</button>
+        <button id="ocr">저장된 영역 OCR</button>
         <button class="secondary" id="save-roi">선택 영역을 OCR ROI로 저장</button>
         <button class="secondary" id="reset-roi">전체 화면 선택</button>
+        <button class="secondary" id="perspective-mode">기울기 보정 영역 선택</button>
+        <button class="secondary" id="perspective-preview" disabled>펴서 미리보기</button>
+        <button class="secondary" id="perspective-save" disabled>보정 영역 저장</button>
+        <button class="secondary" id="selection-large">선택 영역 크게 보기</button>
         <button class="secondary" id="refresh">데이터 새로고침</button>
       </div>
     </div>
     <aside class="card">
-      <h2>선택 영역 실시간 확대</h2>
+      <h2 id="zoom-title">선택 영역 실시간 확대</h2>
       <canvas id="zoom" class="zoom" width="960" height="540"></canvas>
+      <div id="perspective-empty" class="zoom" style="display:grid;place-items:center;color:var(--muted);padding:24px;text-align:center" hidden>왼쪽 영상에서 새 모서리 네 점을 선택하세요.</div>
       <div id="roi-value" class="roi-value">영역을 선택하세요.</div>
+      <img id="perspective-image" class="zoom" alt="현재 기울기 보정 화면" hidden>
       <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
       <h2>카메라 상태</h2>
       <dl>
@@ -72,7 +148,24 @@
     </aside>
   </section>
   <section class="card table-card">
-    <h2>OCR 데이터</h2>
+    <h2>주기 분석 기록</h2>
+    <p class="hint">최근 20회의 자동·수동 분석값입니다. 각 행의 버튼으로 해당 분석 사진을 확인할 수 있습니다.</p>
+    <table style="min-width:1300px">
+      <thead><tr><th>시각</th><th>상태</th><th>Beam</th><th>Attenuator</th><th>ISOL Beam</th><th>ISOL Element</th><th>ISOL Energy</th><th>ISOL Current</th><th>Pulse Rate</th><th>Pulse Width</th><th>사진</th></tr></thead>
+      <tbody id="analysis-sheet"><tr><td colspan="11">분석 기록을 불러오는 중…</td></tr></tbody>
+    </table>
+  </section>
+  <section class="card table-card" id="recent-analysis">
+    <h2>최근 분석 사진</h2>
+    <p class="hint">판독에 실제로 사용한 보정 화면을 최근 20개까지 보관합니다. Current 영역만 따로 확대해서 확인할 수도 있습니다.</p>
+    <div id="artifact-gallery" class="artifact-grid"><p>분석 사진을 불러오는 중…</p></div>
+  </section>
+  <div id="lightbox" class="lightbox" hidden role="dialog" aria-modal="true" aria-label="선택 영역 크게 보기">
+    <button id="lightbox-close" class="secondary" aria-label="닫기">✕</button>
+    <img id="lightbox-image" alt="확대된 선택 영역">
+  </div>
+  <section class="card table-card">
+    <h2>선택 영역 OCR 기록</h2>
     <table>
       <thead><tr><th>시각</th><th>상태</th><th>값</th><th>OCR 원문</th><th>오류</th></tr></thead>
       <tbody id="readings"><tr><td colspan="5">기록이 없습니다.</td></tr></tbody>
@@ -81,9 +174,161 @@
 </main>
 <script>
   const $ = id => document.getElementById(id);
+  let monitorStamp = null, scheduleLoaded = false, perspectiveLoaded = false, doorayLoaded = false;
+  function monitorValueColor(field, stale) {
+    if (field.status !== 'ok' || stale) return 'var(--muted)';
+    if ((field.key === 'beam' || field.key === 'isol_beam') && field.value === 'OFF') return 'var(--blue)';
+    if (field.key === 'current_ua' && Number(field.value) === 0) return 'var(--blue)';
+    return 'var(--green)';
+  }
+  function shortTime(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value || '') : `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}`;
+  }
+  async function updateMonitor() {
+    try {
+      const state = await request('/api/monitor');
+      $('monitor-card').hidden = !state.available;
+      if (!state.available) return;
+      if (!scheduleLoaded) {
+        $('capture-enabled').checked = state.capture_enabled;
+        $('capture-interval').value = state.capture_interval_seconds;
+        $('analysis-enabled').checked = state.analysis_enabled;
+        $('analysis-interval').value = state.analysis_interval_seconds;
+        $('voice-beam-enabled').checked = state.voice_beam_enabled;
+        $('voice-current-enabled').checked = state.voice_current_enabled;
+        $('voice-hourly-enabled').checked = state.voice_hourly_enabled;
+        scheduleLoaded = true;
+      }
+      if (!doorayLoaded && state.dooray) {
+        $('dooray-enabled').checked=state.dooray.enabled;
+        $('dooray-public-url').value=state.dooray.public_base_url || '';
+        doorayLoaded=true;
+      }
+      $('service-start').disabled=state.service_enabled;
+      $('service-stop').disabled=!state.service_enabled;
+      if (state.dooray) {
+        const last=state.dooray.last_sent_at ? ` · 마지막 성공 ${shortTime(state.dooray.last_sent_at)}` : '';
+        const latest=state.dooray.latest ? ` · ${state.dooray.latest.status==='ok'?'성공':'실패'}: ${state.dooray.latest.message}` : '';
+        $('dooray-status').textContent=`Webhook ${state.dooray.configured?'설정됨':'미설정'}${last}${latest}`;
+        $('dooray-profile-state').textContent=state.dooray.configured
+          ? (state.dooray.enabled ? '● 저장됨 · 자동 전송 켜짐' : '● 저장됨 · 자동 전송 꺼짐') : '● Webhook 미설정';
+        $('dooray-profile-host').textContent=state.dooray.host || '-';
+        $('dooray-profile-url').textContent=state.dooray.masked_url || '-';
+        $('dooray-profile-photo').textContent=state.dooray.photo_ready ? '전송 가능 · 외부 HTTPS 주소 사용' : '전송 불가 · 공개 주소 필요 (Current만 전송)';
+      }
+      if (!perspectiveLoaded) {
+        perspectiveLoaded = true;
+        const savedPoints = state.perspective && state.perspective.points;
+        if (Array.isArray(savedPoints) && savedPoints.length === 4) {
+          perspectivePoints = savedPoints.map(point => ({x:Number(point[0]), y:Number(point[1])}));
+          setPerspectiveMode(true);
+        }
+      }
+      $('monitor-run').disabled = state.busy;
+      const result = state.latest;
+      const age = result ? (Date.now() - Date.parse(result.timestamp)) / 1000 : 0;
+      const stale = age > state.analysis_interval_seconds * 2 + 20;
+      const statusLabel = {ok:'판독 완료',partial:'일부 항목 확인 필요',error:'판독 실패'};
+      const captureText = state.capture_enabled ? `사진 ${state.capture_interval_seconds}초` : '사진 저장 중지';
+      const analysisText = state.analysis_enabled ? `분석 ${state.analysis_interval_seconds}초` : '분석 중지';
+      const captureResult = state.latest_capture ? ` · 최근 사진 ${shortTime(state.latest_capture.timestamp)}${state.latest_capture.error ? ' 실패: '+state.latest_capture.error : ''}` : '';
+      const voiceResult = state.latest_voice_alert ? ` · 최근 음성 ${shortTime(state.latest_voice_alert.timestamp)} ${state.latest_voice_alert.message}` : '';
+      $('monitor-status').textContent = `${captureText} · ${analysisText}${state.busy ? ' · 읽는 중…' : ''}${captureResult}`
+        + voiceResult + (result ? ` · ${shortTime(result.timestamp)} · ${statusLabel[result.status] || result.status}${stale ? ' · 오래된 결과' : ''}${result.tracking ? ' · 위치 보정 '+result.tracking.max_shift_px+'px' : ''}${result.error ? ' · '+result.error : ''}` : ' · 첫 판독 대기');
+      if (result) {
+        $('monitor-values').innerHTML = result.fields.length ? result.fields.map(f => `<div style="padding:12px;background:var(--bg);border-radius:8px"><div class="hint">${escapeHtml(f.label)}</div><strong style="font-size:22px;color:${monitorValueColor(f,stale)}">${f.value != null ? escapeHtml(typeof f.value==='number' ? f.value.toFixed(f.decimals || 0) : String(f.value))+' <small>'+escapeHtml(f.unit)+'</small>' : '확인 필요'}</strong></div>`).join('') : '<p>새 측정값을 얻지 못했습니다. 카메라와 화면 위치를 확인하세요.</p>';
+        if (result.artifact !== monitorStamp) {
+          monitorStamp = result.artifact;
+          $('monitor-preview').hidden = !result.tracking;
+          if (result.tracking) {
+            const correctedSrc='/api/monitor/preview.jpg?t='+encodeURIComponent(result.timestamp);
+            $('monitor-preview').src=correctedSrc;
+            if (selectionMode==='perspective') {
+              $('perspective-image').src=correctedSrc;
+              $('perspective-image').hidden=false;
+              $('perspective-empty').hidden=true;
+            }
+          }
+        }
+      }
+    } catch(e) { $('monitor-status').textContent='자동 판독 서버 연결 실패 · 표시값은 마지막 수신 결과입니다.'; }
+  }
+  async function monitorAction(path) {
+    $('monitor-run').disabled=true;
+    try {
+      const result=await request('/api/monitor/'+path,{method:'POST'});
+      if(result.queued) $('message').textContent='현재 분석이 끝난 뒤 한 번 더 읽도록 예약했습니다.';
+    }
+    catch(e) { $('monitor-status').textContent=e.message; }
+    finally { await updateMonitor(); }
+  }
+  $('monitor-run').onclick=()=>monitorAction('run');
+  async function serviceAction(start) {
+    $('service-start').disabled=true; $('service-stop').disabled=true;
+    try {
+      await request(`/api/service/${start?'start':'stop'}`,{method:'POST'});
+      if(start) $('live').src='/api/live.mjpg?t='+Date.now();
+      $('message').textContent=start ? '카메라와 자동 분석을 시작했습니다.' : '카메라와 자동 분석을 중지했습니다.';
+    } catch(e) { $('message').textContent=`서비스 제어 실패: ${e.message}`; }
+    finally { await updateMonitor(); await updateStatus(); }
+  }
+  $('service-start').onclick=()=>serviceAction(true);
+  $('service-stop').onclick=()=>serviceAction(false);
+  $('voice-test').onclick=async()=>{
+    try {
+      await request('/api/monitor/voice/test',{method:'POST'});
+      $('message').textContent='서버 스피커로 음성 테스트를 재생했습니다.';
+    } catch(e) { $('message').textContent=`음성 테스트 실패: ${e.message}`; }
+  };
+  $('schedule-save').onclick=async()=>{
+    const button=$('schedule-save'); button.disabled=true;
+    try {
+      await request('/api/monitor/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        capture_enabled:$('capture-enabled').checked,
+        capture_interval_seconds:Number($('capture-interval').value),
+        analysis_enabled:$('analysis-enabled').checked,
+        analysis_interval_seconds:Number($('analysis-interval').value),
+        voice_beam_enabled:$('voice-beam-enabled').checked,
+        voice_current_enabled:$('voice-current-enabled').checked,
+        voice_hourly_enabled:$('voice-hourly-enabled').checked
+      })});
+      scheduleLoaded=false; await updateMonitor();
+      $('message').textContent='사진·분석 주기와 세 가지 음성 알림 설정을 저장했습니다.';
+    } catch(e) { $('message').textContent=`주기 저장 실패: ${e.message}`; }
+    finally { button.disabled=false; }
+  };
+  $('dooray-save').onclick=async()=>{
+    const button=$('dooray-save'); button.disabled=true;
+    try {
+      await request('/api/monitor/dooray/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        enabled:$('dooray-enabled').checked,
+        webhook_url:$('dooray-webhook').value.trim(),
+        public_base_url:$('dooray-public-url').value.trim()
+      })});
+      $('dooray-webhook').value=''; doorayLoaded=false; await updateMonitor();
+      $('message').textContent='Dooray 자동 전송 설정을 저장했습니다.';
+    } catch(e) { $('message').textContent=`Dooray 설정 실패: ${e.message}`; }
+    finally { button.disabled=false; }
+  };
+  $('dooray-test').onclick=async()=>{
+    const button=$('dooray-test'); button.disabled=true;
+    try { await request('/api/monitor/dooray/test',{method:'POST'}); $('message').textContent='Dooray 테스트 메시지를 보냈습니다.'; }
+    catch(e) { $('message').textContent=`Dooray 테스트 실패: ${e.message}`; }
+    finally { button.disabled=false; await updateMonitor(); }
+  };
+  $('dooray-send-now').onclick=async()=>{
+    const button=$('dooray-send-now'); button.disabled=true;
+    try {
+      const result=await request('/api/monitor/dooray/send-now',{method:'POST'});
+      $('message').textContent=result.dooray.message;
+    } catch(e) { $('message').textContent=`Dooray 전송 실패: ${e.message}`; }
+    finally { button.disabled=false; await updateMonitor(); }
+  };
   const live = $('live'), overlay = $('overlay'), overlayContext = overlay.getContext('2d');
   const zoom = $('zoom'), zoomContext = zoom.getContext('2d');
   let selection = null, dragStart = null, configuredRoiLoaded = false;
+  let selectionMode = 'rectangle', perspectivePoints = [], perspectiveDrag = -1;
   async function request(url, options) {
     const response = await fetch(url, options);
     const data = await response.json();
@@ -93,7 +338,7 @@
   async function updateStatus() {
     try {
       const s = await request('/api/status');
-      $('connection').textContent = s.connected ? '● 카메라 연결됨' : '● 카메라 연결 대기';
+      $('connection').textContent = !s.enabled ? '● 카메라 중지됨' : (s.connected ? '● 카메라 연결됨' : '● 카메라 연결 대기');
       $('connection').className = `status ${s.connected ? 'ok' : 'bad'}`;
       $('device').textContent = s.device; $('resolution').textContent = s.resolution;
       $('fps').textContent = s.stream_fps; $('age').textContent = s.frame_age_seconds == null ? '-' : `${s.frame_age_seconds}초`;
@@ -108,10 +353,49 @@
     try {
       const data = await request('/api/readings?limit=100');
       $('readings').innerHTML = data.readings.length ? data.readings.map(r => `<tr>
-        <td>${escapeHtml(r.timestamp)}</td><td><span class="pill ${escapeHtml(r.status)}">${escapeHtml(r.status)}</span></td>
+        <td>${escapeHtml(shortTime(r.timestamp))}</td><td><span class="pill ${escapeHtml(r.status)}">${escapeHtml(r.status)}</span></td>
         <td>${escapeHtml(r.value)}</td><td class="raw">${escapeHtml(r.raw_text)}</td><td>${escapeHtml(r.error)}</td></tr>`).join('')
         : '<tr><td colspan="5">기록이 없습니다.</td></tr>';
     } catch (e) { $('message').textContent = `데이터 조회 실패: ${e.message}`; }
+  }
+  async function updateArtifacts() {
+    try {
+      const data = await request('/api/monitor/artifacts');
+      const fieldText = (fields,key) => {
+        const field=fields && fields[key];
+        if (!field || field.value == null) return '확인 필요';
+        const value=typeof field.value==='number' ? field.value.toFixed(field.decimals || 0) : String(field.value);
+        return value+(field.unit ? ' '+field.unit : '');
+      };
+      $('analysis-sheet').innerHTML = data.artifacts.length ? data.artifacts.map(item => {
+        const base='/api/monitor/artifacts/'+encodeURIComponent(item.artifact)+'/';
+        const fields=item.fields || {};
+        return `<tr><td>${escapeHtml(shortTime(item.timestamp))}</td><td><span class="pill ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
+          <td>${escapeHtml(fieldText(fields,'beam'))}</td><td>${escapeHtml(fieldText(fields,'attenuator'))}</td>
+          <td>${escapeHtml(fieldText(fields,'isol_beam'))}</td><td>${escapeHtml(fieldText(fields,'isol_element'))}</td>
+          <td>${escapeHtml(fieldText(fields,'energy_kev_u'))}</td><td>${escapeHtml(fieldText(fields,'current_ua'))}</td>
+          <td>${escapeHtml(fieldText(fields,'isol_rate_hz'))}</td><td>${escapeHtml(fieldText(fields,'isol_width_us'))}</td>
+          <td><button class="secondary artifact-open" data-src="${base}aligned.jpg">사진 보기</button>
+          <button class="secondary artifact-open" data-src="${base}current_ua-gray.png">Current 영역</button></td></tr>`;
+      }).join('') : '<tr><td colspan="11">아직 완료된 분석 기록이 없습니다.</td></tr>';
+      $('artifact-gallery').innerHTML = data.artifacts.length ? data.artifacts.map(item => {
+        const base='/api/monitor/artifacts/'+encodeURIComponent(item.artifact)+'/';
+        const current=item.current;
+        const currentText=current
+          ? (current.value == null ? 'Current: 확인 필요' : `Current: ${Number(current.value).toFixed(current.decimals || 0)} ${current.unit || ''}`)
+          : 'Current 결과 없음';
+        return `<article class="artifact">
+          <img src="${base}aligned.jpg" data-large="${base}aligned.jpg" alt="${escapeHtml(shortTime(item.timestamp))} 분석 보정 화면" loading="lazy">
+          <div class="artifact-info"><strong>${escapeHtml(shortTime(item.timestamp))}</strong>
+          <div class="hint">${escapeHtml(item.status)} · ${escapeHtml(currentText)}${item.error ? ' · '+escapeHtml(item.error) : ''}</div>
+          <div class="buttons"><button class="secondary artifact-open" data-src="${base}aligned.jpg">전체 화면</button>
+          <button class="secondary artifact-open" data-src="${base}current_ua-gray.png">Current 영역</button></div></div>
+        </article>`;
+      }).join('') : '<p>아직 완료된 분석 사진이 없습니다.</p>';
+    } catch (e) {
+      $('analysis-sheet').innerHTML=`<tr><td colspan="11">분석 기록 조회 실패: ${escapeHtml(e.message)}</td></tr>`;
+      $('artifact-gallery').innerHTML=`<p>분석 사진 조회 실패: ${escapeHtml(e.message)}</p>`;
+    }
   }
   function escapeHtml(value) { const d=document.createElement('div'); d.textContent=value || ''; return d.innerHTML; }
   function sourceSize() {
@@ -131,6 +415,22 @@
   }
   function drawSelection() {
     overlayContext.clearRect(0,0,overlay.width,overlay.height);
+    if (selectionMode === 'perspective') {
+      const size=sourceSize(), sx=overlay.width/size.width, sy=overlay.height/size.height;
+      if (perspectivePoints.length) {
+        overlayContext.beginPath();
+        perspectivePoints.forEach((point,index)=>index ? overlayContext.lineTo(point.x*sx,point.y*sy) : overlayContext.moveTo(point.x*sx,point.y*sy));
+        if (perspectivePoints.length===4) overlayContext.closePath();
+        overlayContext.strokeStyle='#ffd166'; overlayContext.lineWidth=3; overlayContext.stroke();
+        perspectivePoints.forEach((point,index)=>{
+          overlayContext.beginPath(); overlayContext.arc(point.x*sx,point.y*sy,7,0,Math.PI*2);
+          overlayContext.fillStyle='#ffd166'; overlayContext.fill(); overlayContext.fillStyle='#07101a';
+          overlayContext.font='bold 11px system-ui'; overlayContext.fillText(String(index+1),point.x*sx-3,point.y*sy+4);
+        });
+      }
+      $('roi-value').textContent = perspectivePoints.length===4 ? '네 점 선택 완료: 좌상 → 우상 → 우하 → 좌하' : `${perspectivePoints.length}/4점 선택`;
+      return;
+    }
     if (!selection) return;
     const size=sourceSize(), sx=overlay.width/size.width, sy=overlay.height/size.height;
     const x=selection.x*sx, y=selection.y*sy, w=selection.width*sx, h=selection.height*sy;
@@ -140,16 +440,35 @@
     $('roi-value').textContent=`x=${Math.round(selection.x)}, y=${Math.round(selection.y)}, width=${Math.round(selection.width)}, height=${Math.round(selection.height)}`;
   }
   overlay.addEventListener('pointerdown', event => {
+    if (selectionMode === 'perspective') {
+      overlay.setPointerCapture(event.pointerId);
+      const point=pointFromEvent(event);
+      perspectiveDrag=perspectivePoints.findIndex(saved=>Math.hypot(saved.x-point.x,saved.y-point.y)<35);
+      if (perspectiveDrag<0) {
+        if (perspectivePoints.length===4) perspectivePoints=[];
+        perspectivePoints.push(point); perspectiveDrag=perspectivePoints.length-1;
+      }
+      const complete=perspectivePoints.length===4;
+      $('perspective-preview').disabled=!complete; $('perspective-save').disabled=!complete;
+      drawSelection(); return;
+    }
     overlay.setPointerCapture(event.pointerId); dragStart=pointFromEvent(event);
     selection={x:dragStart.x,y:dragStart.y,width:1,height:1}; drawSelection();
   });
   overlay.addEventListener('pointermove', event => {
-    if (!dragStart) return; const p=pointFromEvent(event);
+    if (selectionMode === 'perspective' && perspectiveDrag>=0) {
+      perspectivePoints[perspectiveDrag]=pointFromEvent(event); drawSelection(); return;
+    }
+    if (selectionMode !== 'rectangle' || !dragStart) return; const p=pointFromEvent(event);
     selection={x:Math.min(p.x,dragStart.x),y:Math.min(p.y,dragStart.y),width:Math.abs(p.x-dragStart.x),height:Math.abs(p.y-dragStart.y)};
     drawSelection();
   });
-  overlay.addEventListener('pointerup', () => { dragStart=null; });
-  overlay.addEventListener('pointercancel', () => { dragStart=null; });
+  overlay.addEventListener('pointerup', () => {
+    const refreshPerspective=selectionMode==='perspective' && perspectivePoints.length===4;
+    dragStart=null; perspectiveDrag=-1;
+    if (refreshPerspective) perspectiveAction(false);
+  });
+  overlay.addEventListener('pointercancel', () => { dragStart=null; perspectiveDrag=-1; });
   function updateZoom() {
     if (selection && selection.width>=2 && selection.height>=2 && live.complete && live.naturalWidth) {
       zoomContext.fillStyle='#05080c'; zoomContext.fillRect(0,0,zoom.width,zoom.height);
@@ -167,7 +486,7 @@
       const data = await request(url, {method:'POST'});
       $('message').textContent = data.reading
         ? `상태: ${data.reading.status}\n값: ${data.reading.value || '(없음)'}\nOCR: ${data.reading.raw_text || '(없음)'}\n${data.reading.error || ''}`
-        : `저장 완료: ${data.path}`;
+        : `원본 저장: ${data.original_path || data.path}${data.selected_path ? '\n선택 영역 저장: '+data.selected_path : ''}`;
       await updateReadings();
     } catch (e) { $('message').textContent = `오류: ${e.message}`; }
     finally { button.disabled = false; }
@@ -181,10 +500,78 @@
     catch(e) { $('message').textContent=`ROI 저장 실패: ${e.message}`; }
   };
   $('reset-roi').onclick = () => { const size=sourceSize(); selection={x:0,y:0,width:size.width,height:size.height}; drawSelection(); };
+  function setPerspectiveMode(enabled) {
+    selectionMode=enabled ? 'perspective' : 'rectangle';
+    $('perspective-mode').textContent=selectionMode==='perspective' ? '일반 영역 선택으로 돌아가기' : '기울기 보정 영역 선택';
+    $('selection-hint').textContent=selectionMode==='perspective' ? '화면 모서리를 좌상 → 우상 → 우하 → 좌하 순서로 네 번 찍으세요.' : '영상 위에서 확대할 부분을 마우스 또는 터치로 드래그하세요.';
+    $('zoom-title').textContent=selectionMode==='perspective' ? '현재 기울기 보정 화면' : '선택 영역 실시간 확대';
+    $('zoom').hidden=selectionMode==='perspective';
+    $('perspective-image').hidden=true;
+    $('perspective-empty').hidden=selectionMode!=='perspective';
+    const complete=selectionMode==='perspective' && perspectivePoints.length===4;
+    $('perspective-preview').disabled=!complete; $('perspective-save').disabled=!complete; drawSelection();
+  }
+  $('perspective-mode').onclick=()=>{
+    setPerspectiveMode(selectionMode!=='perspective');
+  };
+  let perspectiveRefreshing=false;
+  async function perspectiveAction(save, silent=false) {
+    if (perspectivePoints.length!==4) return;
+    if (perspectiveRefreshing && !save) return;
+    const button=$(save?'perspective-save':'perspective-preview'); button.disabled=true;
+    if (!save) perspectiveRefreshing=true;
+    try {
+      const points=perspectivePoints.map(point=>[Math.round(point.x),Math.round(point.y)]);
+      if (!silent) $('message').textContent='기울기를 펴는 중…';
+      await request(`/api/perspective/${save?'save':'preview'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({points})});
+      $('perspective-image').src='/api/perspective/preview.jpg?t='+Date.now();
+      $('perspective-image').hidden=false; $('perspective-empty').hidden=true;
+      if (!silent) $('message').textContent=save ? '기울기 보정 영역과 현재 기준 사진을 저장했습니다.' : '현재 보정 화면을 표시합니다.';
+    } catch(e) { if (!silent) $('message').textContent=`원근 보정 실패: ${e.message}`; }
+    finally { button.disabled=false; if (!save) perspectiveRefreshing=false; }
+  }
+  $('perspective-preview').onclick=()=>perspectiveAction(false);
+  $('perspective-save').onclick=()=>perspectiveAction(true);
+  $('perspective-image').onerror=()=>{
+    $('perspective-image').hidden=true; $('perspective-empty').hidden=false;
+    $('message').textContent='보정 그림을 불러오지 못했습니다. 네 점을 다시 선택해주세요.';
+  };
+  function openLargeSelection() {
+    try {
+      if (selectionMode==='perspective') {
+        if ($('perspective-image').hidden || !$('perspective-image').src) {
+          $('message').textContent='먼저 네 점을 선택해 보정 미리보기를 만드세요.'; return;
+        }
+        $('lightbox-image').src=$('perspective-image').src;
+      } else {
+        if (!selection || selection.width<2 || selection.height<2) {
+          $('message').textContent='먼저 확대할 영역을 선택하세요.'; return;
+        }
+        $('lightbox-image').src=zoom.toDataURL('image/jpeg',.94);
+      }
+      $('lightbox').hidden=false;
+    } catch(e) { $('message').textContent=`크게 보기 실패: ${e.message}`; }
+  }
+  function closeLargeSelection() { $('lightbox').hidden=true; $('lightbox-image').removeAttribute('src'); }
+  $('selection-large').onclick=openLargeSelection;
+  $('zoom').onclick=openLargeSelection;
+  $('perspective-image').onclick=openLargeSelection;
+  $('lightbox-close').onclick=closeLargeSelection;
+  $('lightbox').onclick=event=>{ if(event.target===$('lightbox')) closeLargeSelection(); };
+  function openArtifact(event) {
+    const target=event.target.closest('[data-src],[data-large]');
+    if (!target) return;
+    $('lightbox-image').src=target.dataset.src || target.dataset.large;
+    $('lightbox').hidden=false;
+  }
+  $('analysis-sheet').onclick=openArtifact;
+  $('artifact-gallery').onclick=openArtifact;
+  document.addEventListener('keydown',event=>{ if(event.key==='Escape') closeLargeSelection(); });
   $('refresh').onclick = updateReadings;
   window.addEventListener('resize', resizeOverlay); live.addEventListener('load', resizeOverlay);
-  resizeOverlay(); updateZoom(); updateStatus(); updateReadings();
-  setInterval(updateStatus, 3000); setInterval(updateReadings, 10000);
+  resizeOverlay(); updateZoom(); updateStatus(); updateReadings(); updateArtifacts();
+  updateMonitor(); setInterval(updateMonitor, 3000);
+  setInterval(updateStatus, 3000); setInterval(updateReadings, 10000); setInterval(updateArtifacts, 10000);
 </script>
 </body>
 </html>

@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -49,11 +50,38 @@ def run_checked(command: list[str]) -> subprocess.CompletedProcess[str]:
         raise PipelineError(f"{command[0]} failed: {detail}") from exc
 
 
+def camera_backend(camera: dict[str, Any]) -> str:
+    backend = camera.get("backend", "avfoundation" if sys.platform == "darwin" else "v4l2")
+    if backend not in ("avfoundation", "v4l2"):
+        raise PipelineError(f"Unsupported camera backend: {backend}")
+    return backend
+
+
+def camera_input_args(camera: dict[str, Any]) -> list[str]:
+    backend = camera_backend(camera)
+    device = str(camera.get("device", "0" if backend == "avfoundation" else "/dev/video0"))
+    args = ["-f", backend]
+    if backend == "avfoundation":
+        if device.startswith("/dev/"):
+            raise PipelineError("macOS에서는 camera.device를 Brio 500 또는 카메라 번호로 설정하세요.")
+        args += ["-pixel_format", str(camera.get("pixel_format", "uyvy422"))]
+        if ":" not in device:
+            device += ":none"
+    else:
+        args += ["-input_format", str(camera.get("input_format", "mjpeg"))]
+    return args + [
+        "-video_size", f"{camera['width']}x{camera['height']}",
+        "-framerate", str(camera["framerate"]), "-i", device,
+    ]
+
+
 def apply_camera_controls(config: dict[str, Any]) -> None:
     camera = config["camera"]
     controls = camera.get("controls", {})
     if not controls:
         return
+    if camera_backend(camera) != "v4l2":
+        raise PipelineError("camera.controls는 Linux V4L2에서만 지원됩니다. macOS에서는 비워 두세요.")
     command = ["v4l2-ctl", "-d", camera["device"]]
     command.extend(f"--set-ctrl={name}={value}" for name, value in controls.items())
     run_checked(command)
@@ -62,14 +90,11 @@ def apply_camera_controls(config: dict[str, Any]) -> None:
 def capture(config: dict[str, Any], destination: Path) -> None:
     camera = config["camera"]
     device = Path(camera["device"])
-    if not device.exists():
+    if camera_backend(camera) == "v4l2" and not device.exists():
         raise PipelineError(f"Camera device does not exist: {device}")
     apply_camera_controls(config)
     run_checked([
-        "ffmpeg", "-loglevel", "error", "-f", "v4l2",
-        "-input_format", str(camera["input_format"]),
-        "-video_size", f"{camera['width']}x{camera['height']}",
-        "-framerate", str(camera["framerate"]), "-i", str(device),
+        "ffmpeg", "-loglevel", "error", *camera_input_args(camera),
         "-frames:v", "1", "-y", str(destination),
     ])
 
@@ -86,7 +111,7 @@ def build_video_filter(config: dict[str, Any]) -> str:
     contrast = float(preprocessing.get("contrast", 1.0))
     brightness = float(preprocessing.get("brightness", 0.0))
     if contrast != 1.0 or brightness != 0.0:
-        filters.append(f"eq=contrast={contrast}:brightness={brightness}")
+        filters.append(f"lutyuv=y='clip((val-128)*{contrast}+128+{brightness}*255,0,255)'")
     if preprocessing.get("sharpen", False):
         filters.append("unsharp=5:5:1.0:5:5:0.0")
     return ",".join(filters)
@@ -216,9 +241,18 @@ def run_once(config: dict[str, Any], config_dir: Path, input_path: Path | None =
 
 def doctor(config: dict[str, Any]) -> list[tuple[str, bool, str]]:
     checks: list[tuple[str, bool, str]] = []
-    for command in ("ffmpeg", "tesseract", "v4l2-ctl", "lsusb"):
+    backend = camera_backend(config["camera"])
+    commands = ("ffmpeg", "tesseract") if backend == "avfoundation" else ("ffmpeg", "tesseract", "v4l2-ctl", "lsusb")
+    for command in commands:
         path = shutil.which(command)
         checks.append((command, path is not None, path or "not installed"))
+    if backend == "avfoundation":
+        try:
+            camera_input_args(config["camera"])
+            checks.append(("camera configuration", True, str(config["camera"]["device"]) + " (영상 수신은 별도 확인 필요)"))
+        except PipelineError as exc:
+            checks.append(("camera configuration", False, str(exc)))
+        return checks
     device = Path(config["camera"]["device"])
     checks.append(("camera device", device.exists(), str(device)))
     try:

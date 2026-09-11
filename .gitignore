@@ -1,5 +1,10 @@
 config.json
 data/
+.DS_Store
+*.pid
+*.log
 __pycache__/
 *.py[cod]
 .venv/
+.runtime/
+/cloudflared
